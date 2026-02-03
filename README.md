@@ -106,7 +106,7 @@ if task.status != PENDING:
 
 ### Миграции
 
-Используется **Alembic** с поддержкой async SQLAlchemy. Сейчас миграции выполняются автоматически при `docker compose up`.
+Используется **Alembic** с поддержкой async SQLAlchemy.
 
 ## Масштабирование
 
