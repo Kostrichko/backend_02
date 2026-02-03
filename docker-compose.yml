@@ -18,9 +18,11 @@ services:
       - "5672:5672"
       - "15672:15672"
     healthcheck:
-      test: rabbitmq-diagnostics ping
-      interval: 3s
+      test: rabbitmq-diagnostics check_port_connectivity
+      interval: 5s
+      timeout: 3s
       retries: 10
+      start_period: 10s
 
   api:
     build: .

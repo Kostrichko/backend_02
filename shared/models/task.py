@@ -12,7 +12,7 @@ class Base(DeclarativeBase):
 class TaskStatus(str, enum.Enum):
     PENDING = "pending"
     PROCESSING = "processing"
-    COMPLETED = "completed"
+    DONE = "done"
     FAILED = "failed"
 
 

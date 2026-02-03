@@ -25,7 +25,7 @@ async def message_consume(message: AbstractIncomingMessage):
 
         try:
             result_data = await work(payload)
-            new_status = TaskStatus.COMPLETED
+            new_status = TaskStatus.DONE
         except Exception as e:
             result_data = str(e)
             new_status = TaskStatus.FAILED
