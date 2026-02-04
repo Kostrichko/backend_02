@@ -14,18 +14,6 @@ class TaskUpdate(BaseModel):
     result: str | None = None
 
 
-class TaskMessage(BaseModel):
-    """ для очереди"""
-    task_id: int
-
-    def to_json(self) -> str:
-        return self.model_dump_json()
-
-    @classmethod
-    def from_json(cls, data: str) -> "TaskMessage":
-        return cls.model_validate_json(data)
-
-
 class TaskResponse(BaseModel):
     id: int
     payload: str

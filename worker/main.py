@@ -1,20 +1,21 @@
+import json
 from aio_pika.abc import AbstractIncomingMessage
 from database import async_session_maker
 from broker import queue
 from shared.models import Task, TaskStatus
-from shared.schemas import TaskMessage
 from worker.solver import work
-
+import asyncio
 
 async def message_consume(message: AbstractIncomingMessage):
     async with message.process():
         try:
-            task_message = TaskMessage.from_json(message.body.decode())
+            data = json.loads(message.body.decode())
+            task_id = data["task_id"]
         except Exception:
             return
 
         async with async_session_maker() as session:
-            db_task = await session.get(Task, task_message.task_id)
+            db_task = await session.get(Task, task_id)
             
             if not db_task or db_task.status != TaskStatus.PENDING:
                 return
@@ -31,7 +32,7 @@ async def message_consume(message: AbstractIncomingMessage):
             new_status = TaskStatus.FAILED
 
         async with async_session_maker() as session:
-            db_task = await session.get(Task, task_message.task_id)
+            db_task = await session.get(Task, task_id)
             if db_task:
                 db_task.status = new_status
                 db_task.result = result_data
@@ -47,5 +48,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    import asyncio
     asyncio.run(main())

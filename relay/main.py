@@ -1,9 +1,9 @@
 import asyncio
+import json
 from sqlalchemy import select, delete
 from database import async_session_maker
 from broker import queue
 from shared.models import Outbox
-from shared.schemas import TaskMessage
 
 
 async def process_outbox():
@@ -15,7 +15,7 @@ async def process_outbox():
         if not messages:
             return
         for msg in messages:
-            await queue.publish(TaskMessage(task_id=msg.task_id))
+            await queue.publish(json.dumps({"task_id": msg.task_id}))
         msg_ids = [msg.id for msg in messages]
         await session.execute(delete(Outbox).where(Outbox.id.in_(msg_ids)))
         await session.commit()
