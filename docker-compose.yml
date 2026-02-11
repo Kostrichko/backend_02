@@ -69,7 +69,7 @@ services:
 
   migrations:
     build: .
-    command: ["sh", "-c", "alembic upgrade head"]
+    command: ["alembic", "upgrade", "head"]
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/tasks_db
     depends_on:
