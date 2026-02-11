@@ -18,10 +18,12 @@ class Queue:
         if self.connection:
             await self.connection.close()
 
-    async def publish(self, message):
+    async def publish(self, message: dict):
+        """Publish message dict to queue."""
+        import json
         await self.channel.default_exchange.publish(
             Message(
-                body=message.to_json().encode(),
+                body=json.dumps(message).encode(),
                 delivery_mode=DeliveryMode.PERSISTENT,
             ),
             routing_key=settings.RABBITMQ_QUEUE,
