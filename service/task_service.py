@@ -29,8 +29,20 @@ class TaskService:
         return result.scalars().all()
 
     async def update_task(self, task_id: int, task_data: TaskUpdate) -> Task | None:
-        """Заглушка"""
-        return await self.get_task(task_id)
+        """Update task fields from task_data."""
+        task = await self.get_task(task_id)
+        if not task:
+            return None
+        
+        if task_data.payload is not None:
+            task.payload = task_data.payload
+        if task_data.status is not None:
+            task.status = task_data.status
+        if task_data.result is not None:
+            task.result = task_data.result
+        
+        await self.session.commit()
+        return task
 
     async def mark_task_failed(self, task: Task, error: str | None = None) -> None:
         task.status = TaskStatus.FAILED
