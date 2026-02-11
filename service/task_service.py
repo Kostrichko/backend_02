@@ -44,6 +44,35 @@ class TaskService:
         await self.session.commit()
         return task
 
+    async def try_claim_task_for_processing(self, task_id: int) -> tuple[Task | None, str | None]:
+        """Try to claim a task for processing with pessimistic lock.
+        
+        Returns:
+            (task, payload) if successfully claimed, (None, None) otherwise
+        """
+        result = await self.session.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .with_for_update()
+        )
+        task = result.scalar_one_or_none()
+        
+        if not task or task.status != TaskStatus.PENDING:
+            return None, None
+        
+        task.status = TaskStatus.PROCESSING
+        payload = task.payload
+        await self.session.commit()
+        return task, payload
+    
+    async def complete_task(self, task_id: int, result_data: str, status: TaskStatus) -> None:
+        """Update task with processing result."""
+        task = await self.get_task(task_id)
+        if task:
+            task.status = status
+            task.result = result_data
+            await self.session.commit()
+
     async def mark_task_failed(self, task: Task, error: str | None = None) -> None:
         task.status = TaskStatus.FAILED
         if error:
@@ -51,12 +80,24 @@ class TaskService:
         await self.session.commit()
 
     async def delete_task(self, task_id: int) -> bool:
-        task = await self.get_task(task_id)
+        """Delete task only if it's not being processed.
+        
+        Uses SELECT FOR UPDATE to prevent race conditions where task status
+        changes between check and delete.
+        """
+        result = await self.session.execute(
+            select(Task)
+            .where(Task.id == task_id)
+            .with_for_update()
+        )
+        task = result.scalar_one_or_none()
+        
         if not task:
             return False
-        """Не лучшее решение, но, чтобы минимально избежать ошибок, сработает"""
+        
         if task.status in (TaskStatus.PENDING, TaskStatus.PROCESSING):
             return False
+        
         await self.session.delete(task)
         await self.session.commit()
         return True

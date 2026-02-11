@@ -68,19 +68,50 @@ while True:
 ---
 
 
-### Идемпотентность обработки
+### Идемпотентность и защита от race conditions
 
-Worker проверяет статус перед обработкой:
+#### Worker: SELECT FOR UPDATE
+
+Worker использует пессимистичную блокировку для предотвращения одновременной обработки задачи:
 
 ```python
-task = get_task(task_id)
+result = await session.execute(
+    select(Task)
+    .where(Task.id == task_id)
+    .with_for_update()  # Блокировка строки
+)
+task = result.scalar_one_or_none()
+
 if task.status != PENDING:
     return  # Уже обработано или в процессе
 ```
 
 **Защита от:**
 - Дубликатов сообщений (RabbitMQ может доставить дважды)
-- Повторной обработки при рестартах
+- Параллельной обработки одной задачи несколькими воркерами
+- TOCTOU (Time-of-Check-Time-of-Use) уязвимостей
+
+#### Relay: Атомарная публикация
+
+Relay публикует и удаляет сообщения по одному, предотвращая частичные сбои:
+
+```python
+for msg in messages:
+    await queue.publish({"task_id": msg.task_id})
+    await session.delete(msg)
+    await session.commit()  # Атомарно для каждого сообщения
+```
+
+Если relay упадёт после публикации 5-го из 10 сообщений, при рестарте будут отправлены только оставшиеся 5 (без дубликатов).
+
+#### TaskService: Блокировка при удалении
+
+```python
+# SELECT FOR UPDATE предотвращает изменение статуса между проверкой и удалением
+task = await session.execute(
+    select(Task).where(Task.id == task_id).with_for_update()
+)
+```
 
 ---
 

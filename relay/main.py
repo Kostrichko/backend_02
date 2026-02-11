@@ -1,23 +1,25 @@
 import asyncio
-from sqlalchemy import select, delete
 from database import async_session_maker
 from broker import queue
-from shared.models import Outbox
+from service import OutboxService
 
 
 async def process_outbox():
+    """Process outbox messages one by one to ensure atomicity.
+    
+    Each message is published and deleted in a single transaction,
+    preventing duplicate deliveries if relay crashes mid-batch.
+    """
     async with async_session_maker() as session:
-        result = await session.execute(
-            select(Outbox).order_by(Outbox.id).limit(10)
-        )
-        messages = result.scalars().all()
-        if not messages:
-            return
+        service = OutboxService(session)
+        messages = await service.get_pending_messages(limit=10)
+        
         for msg in messages:
+            # Publish to queue
             await queue.publish({"task_id": msg.task_id})
-        msg_ids = [msg.id for msg in messages]
-        await session.execute(delete(Outbox).where(Outbox.id.in_(msg_ids)))
-        await session.commit()
+            
+            # Delete from outbox in same iteration to maintain atomicity
+            await service.delete_message(msg)
 
 
 async def main():
