@@ -1,3 +1,3 @@
-from shared.schemas.task import TaskUpdate, TaskCreate, TaskResponse, TaskStatusResponse
+from shared.schemas.task import TaskUpdate, TaskCreate, TaskResponse
 
-__all__ = ["TaskCreate", "TaskResponse", "TaskStatusResponse", "TaskUpdate"]
+__all__ = ["TaskCreate", "TaskResponse", "TaskUpdate"]

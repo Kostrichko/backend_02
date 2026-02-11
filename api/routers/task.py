@@ -1,4 +1,3 @@
-from typing import List
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from database import get_session
@@ -24,7 +23,7 @@ async def create_task(
     return {"task_id": task.id, "status": task.status}
 
 
-@router.get("/", response_model=List[TaskResponse])
+@router.get("/", response_model=list[TaskResponse])
 async def get_all_tasks(
     skip: int = 0,
     limit: int = 100,

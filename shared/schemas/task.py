@@ -1,5 +1,4 @@
 from datetime import datetime
-from typing import Any
 from pydantic import BaseModel, ConfigDict
 from shared.models.task import TaskStatus
 
@@ -10,7 +9,6 @@ class TaskCreate(BaseModel):
 
 class TaskUpdate(BaseModel):
     payload: str | None = None
-    status: TaskStatus | None = None
     result: str | None = None
 
 
@@ -22,8 +20,3 @@ class TaskResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
     model_config = ConfigDict(from_attributes=True)
-
-
-class TaskStatusResponse(BaseModel):
-    task_id: int
-    status: TaskStatus

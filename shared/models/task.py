@@ -1,7 +1,6 @@
 import enum
 from datetime import datetime
 from sqlalchemy import Enum, DateTime, func, String, Index
-from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -24,7 +23,7 @@ class Task(Base):
         Index('ix_tasks_status_created_at', 'status', 'created_at'))
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    
+
     payload: Mapped[str] = mapped_column(String, nullable=False)
 
     status: Mapped[TaskStatus] = mapped_column(
