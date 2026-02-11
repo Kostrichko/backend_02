@@ -27,8 +27,14 @@ class TaskService:
             select(Task).where(Task.id == task_id))
         return result.scalar_one_or_none()
 
-    async def get_all_tasks(self) -> Sequence[Task]:
-        result = await self.session.execute(select(Task))
+    async def get_all_tasks(self, skip: int = 0, limit: int = 100) -> Sequence[Task]:
+        """Get all tasks with pagination."""
+        # Enforce maximum limit to prevent OOM
+        result = await self.session.execute(
+            select(Task)
+            .order_by(Task.created_at.desc())
+            .offset(skip)
+            .limit(limit))
         return result.scalars().all()
 
     async def update_task(self, task_id: int, task_data: TaskUpdate) -> Task | None:
@@ -38,8 +44,6 @@ class TaskService:
         
         if task_data.payload is not None:
             task.payload = task_data.payload
-        if task_data.status is not None:
-            task.status = task_data.status
         if task_data.result is not None:
             task.result = task_data.result
         

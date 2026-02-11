@@ -17,8 +17,7 @@ async def get_task_session(session=Depends(get_session)):
 @router.post("/", status_code=status.HTTP_202_ACCEPTED)
 async def create_task(
     task_data: TaskCreate,
-    service: TaskService = Depends(get_task_session),
-):
+    service: TaskService = Depends(get_task_session)):
     logger.info(f"Creating task")
     task = await service.create_task(task_data)
     logger.info(f"Task {task.id} created successfully")
@@ -26,8 +25,12 @@ async def create_task(
 
 
 @router.get("/", response_model=List[TaskResponse])
-async def get_all_tasks(service: TaskService = Depends(get_task_session)):
-    return await service.get_all_tasks()
+async def get_all_tasks(
+    skip: int = 0,
+    limit: int = 100,
+    service: TaskService = Depends(get_task_session)):
+    """Get all tasks with pagination."""
+    return await service.get_all_tasks(skip=skip, limit=limit)
 
 
 @router.get("/{task_id}", response_model=TaskResponse)
