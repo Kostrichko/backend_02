@@ -1,7 +1,17 @@
 # Асинхронная система обработки задач
 
-Высоконагруженное приложение для надежной обработки задач через очередь сообщений.  
-Построено на **FastAPI**, **PostgreSQL** и **RabbitMQ**.
+Backend-сервис на FastAPI для приема и асинхронной обработки задач через RabbitMQ.
+
+---
+
+## Задача
+
+Реализовать сервис, который:
+- принимает задачи через `POST /tasks` с полем `payload`
+- сохраняет в PostgreSQL и отправляет в очередь
+- фоновым воркером обрабатывает задачи (имитация через sleep)
+- обновляет статус: `pending` → `processing` → `done` / `failed`
+- запускается через `docker compose up`
 
 ---
 
@@ -11,111 +21,14 @@
 docker compose up
 ```
 
-API будет доступен на http://localhost:8000/docs
+API: http://localhost:8000/docs
+RabbitMQ UI: http://localhost:15672 (guest/guest)
 
-> Миграции выполняются автоматически при старте контейнеров
+> Миграции применяются автоматически при старте контейнеров.
 
 ---
 
 ## Архитектура
-
-### Почему RabbitMQ, а не Kafka?
-
-Выбрал RabbitMQ по нескольким причинам:
-
-- Обычная очередь задач
-- Не нужны партиции, топики, consumer groups
-- RabbitMQ легче разворачивать и мониторить для небольших нагрузок
-- Гарантии `message.ack()`
-
-Для текущей задачи (обработка задач с гарантией выполнения) RabbitMQ подходит.
-
-
-### Outbox
-
-Хотим, чтобы задача атомарно сохранялась в бд и отправлялась брокеру. для этого используем доп. таблицу Outbox:
-
-```python
-# Атомарная транзакция
-async with session.begin():
-    task = Task(payload=payload)
-    session.add(task)
-    session.flush()  # Получили ID
-    
-    outbox = Outbox(task_id=task.id)  # Записали в outbox
-    session.add(outbox)
-    # Commit обеих записей в одной транзакции
-```
-
-**Publisher (relay)** периодически читает `outbox` и публикует в RabbitMQ:
-
-```python
-while True:
-    messages = select_from_outbox()
-    for msg in messages:
-        queue.publish(msg.task_id)
-        delete_from_outbox(msg.id)
-    sleep(1)
-```
-
-**Преимущества:**
-
-- API работает только с БД (ACID транзакции)
-- При падении relay сообщения остаются в outbox
-- Гарантия: любая задача попадет в очередь (eventually consistent)
-- Payload не попадает в брокер (защита от огромных данных)
-
----
-
-
-### Идемпотентность и защита от race conditions
-
-#### Worker: SELECT FOR UPDATE
-
-Worker использует пессимистичную блокировку для предотвращения одновременной обработки задачи:
-
-```python
-result = await session.execute(
-    select(Task)
-    .where(Task.id == task_id)
-    .with_for_update()  # Блокировка строки
-)
-task = result.scalar_one_or_none()
-
-if task.status != PENDING:
-    return  # Уже обработано или в процессе
-```
-
-**Защита от:**
-- Дубликатов сообщений (RabbitMQ может доставить дважды)
-- Параллельной обработки одной задачи несколькими воркерами
-- TOCTOU (Time-of-Check-Time-of-Use) уязвимостей
-
-#### Relay: Атомарная публикация
-
-Relay публикует и удаляет сообщения по одному, предотвращая частичные сбои:
-
-```python
-for msg in messages:
-    await queue.publish({"task_id": msg.task_id})
-    await session.delete(msg)
-    await session.commit()  # Атомарно для каждого сообщения
-```
-
-Если relay упадёт после публикации 5-го из 10 сообщений, при рестарте будут отправлены только оставшиеся 5 (без дубликатов).
-
-#### TaskService: Блокировка при удалении
-
-```python
-# SELECT FOR UPDATE предотвращает изменение статуса между проверкой и удалением
-task = await session.execute(
-    select(Task).where(Task.id == task_id).with_for_update()
-)
-```
-
----
-
-### Компоненты системы
 
 ```
 ┌─────────┐      ┌─────────┐      ┌──────────┐      ┌──────────┐      ┌────────┐
@@ -130,90 +43,74 @@ task = await session.execute(
                                    └─────────┘
 ```
 
-**Компоненты:**
-
-- **API** (FastAPI) — принимает HTTP-запросы, валидирует схемы
-- **Service Layer** — бизнес-логика, работа с БД через ORM (создание Task + Outbox атомарно)
-- **Publisher** (relay) — читает Outbox, публикует task_id в RabbitMQ, очищает Outbox
-- **Worker** — слушает RabbitMQ, обрабатывает задачи через Service Layer, обновляет статус
-
-Каждый сервис можно масштабировать независимо:
-- API: несколько реплик за load balancer
-- Publisher: активный + standby или несколько с lock-based coordination
-- Worker: N реплик — RabbitMQ распределит нагрузку
-
-
-### Миграции
-
-Используется **Alembic** с поддержкой async SQLAlchemy.
-
-## Масштабирование
-
-### Горизонтальное масштабирование воркеров
-
-Легко добавить новые инстансы: RabbitMQ автоматически распределит задачи между ними ( например через round-robin). Каждый worker обрабатывает задачи параллельно, но не больше одного воркера на задачу (идемпотентность).
-
-### Вертикальное масштабирование
-
-**Worker:**
-- можно вводить multiprocessing
-
-### Шардирование бд
-
-### Реплики сервисных уровней и API, добавление балансировщика
-
-
-## Потенциальные точки отказа
-
-<table>
-<tr>
-<td><strong>Проблема</strong></td>
-<td><strong>Решение</strong></td>
-</tr>
-<tr>
-<td> Publisher упал → задачи накапливаются в outbox</td>
-<td> Дубликация или CDC (Change Data Capture)</td>
-</tr>
-<tr>
-<td>Postgres не выдерживает нагрузку</td>
-<td> Outbox в Redis + payload там же</td>
-</tr>
-<tr>
-<td> <code>durable=True</code> → медленная запись на диск</td>
-<td> Lazy queues (память → диск при нехватке)</td>
-</tr>
-<tr>
-<td> Отсутствует rate limiting</td>
-<td> Nginx</td>
-</tr>
-</table>
-
-**Что еще нужно добавить:**
-
-- TTL для сообщений в RabbitMQ
-- Структурированное логирование (ELK/Loki)
-- Метрики (Prometheus + Grafana)
-- Интеграционные и E2E тесты
-- API Versioning
+| Компонент | Роль |
+|-----------|------|
+| **API** | HTTP-эндпоинты, валидация через Pydantic |
+| **Service Layer** | Бизнес-логика, работа с БД через SQLAlchemy |
+| **Publisher (relay)** | Читает outbox, публикует task_id в RabbitMQ, удаляет из outbox |
+| **Worker** | Слушает RabbitMQ, обрабатывает задачи, обновляет статус |
 
 ---
 
-## Структура проекта
+## Почему RabbitMQ, а не Kafka
 
+- Задача — простая очередь задач, не стриминг событий
+- Не нужны партиции, топики, consumer groups
+- Встроенный `message.ack()` — подтверждение обработки
+- Проще в настройке и мониторинге для данного масштаба
+
+---
+
+## Ключевые решения
+
+### Outbox pattern
+
+API не пишет в RabbitMQ напрямую. Задача и outbox-запись создаются в одной транзакции:
+
+```python
+async with session.begin():
+    task = Task(payload=payload)
+    session.add(task)
+    session.flush()
+
+    outbox = Outbox(task_id=task.id)
+    session.add(outbox)
 ```
-├── api/              # FastAPI приложение
-│   └── routers/      # Эндпоинты
-├── worker/           # Обработчик задач
-│   └── solver.py     # Бизнес-логика
-├── relay/            # Publisher (Outbox → RabbitMQ)
-├── service/          # Бизнес-логика
-├── database/         # БД setup
-│   └── migration/    # Alembic миграции
-├── shared/           # Общий код
-│   ├── models/       # ORM модели
-│   └── schemas/      # Pydantic схемы
-└── docker-compose.yml
+
+Publisher (relay) периодически читает outbox и публикует в очередь. Если relay упадёт — сообщения останутся в outbox и будут доставлены при рестарте.
+
+**Зачем:**
+- API работает только с БД — ACID транзакции
+- Гарантия доставки (eventually consistent)
+- Payload не попадает в брокер — защита от больших данных
+
+### SELECT FOR UPDATE
+
+Worker использует пессимистичную блокировку при обработке:
+
+```python
+result = await session.execute(
+    select(Task).where(Task.id == task_id).with_for_update()
+)
 ```
+
+**Зачем:**
+- RabbitMQ может доставить сообщение дважды
+- Несколько воркеров не обработают одну задачу
+- Защита от TOCTOU (Time-of-Check-Time-of-Use)
+
+### Атомарная публикация в relay
+
+Relay публикует и удаляет сообщения по одному:
+
+```python
+for msg in messages:
+    await queue.publish({"task_id": msg.task_id})
+    await session.delete(msg)
+    await session.commit()
+```
+
+При падении после 5-го из 10 сообщений — при рестарте будут отправлены только оставшиеся 5.
 
 ---
 
@@ -221,15 +118,95 @@ task = await session.execute(
 
 | Статус | Описание |
 |--------|----------|
-| `pending` | Создана, ждет в очереди |
+| `pending` | Создана, ожидает обработки |
 | `processing` | Worker взял в работу |
-| `done` | Успешно выполнена |
-| `failed` | Ошибка при выполнении |
+| `done` | Успешно обработана |
+| `failed` | Ошибка при обработке |
 
-## Сложности при разработке
+Удаление задачи возможно только в статусе `done` или `failed`.
 
-### 1. Docker Compose зависимости и healthchecks
-Несколько раз сталкивался с тем, что воркеры стартовали раньше RabbitMQ и падали с `ConnectionRefusedError`. Пришлось изучать healthchecks, `depends_on` с `condition`, разбираться почему `service_started` недостаточно и нужен `service_healthy`.
+---
 
-### 2. Автоматизация миграций
-Хотел, чтобы `docker compose up` запускал все автоматически, включая миграции. Проблема: старые файлы миграций могли конфликтовать с новой схемой. Решение с очисткой `alembic_version` пришло не сразу — сначала пытался удалять файлы вручную.
+## API
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| `POST` | `/tasks` | Создать задачу. Возвращает `task_id` и `status` |
+| `GET` | `/tasks` | Список задач с пагинацией (`skip`, `limit`) |
+| `GET` | `/tasks/{id}` | Получить задачу по ID |
+| `PATCH` | `/tasks/{id}` | Обновить `payload` или `result` |
+| `DELETE` | `/tasks/{id}` | Удалить задачу (только `done`/`failed`) |
+
+---
+
+## Масштабирование
+
+**Worker:** запустить N реплик — RabbitMQ распределит задачи автоматически (round-robin). `SELECT FOR UPDATE` гарантирует, что задача будет обработана ровно один раз.
+
+**API:** несколько реплик за балансировщиком.
+
+**Publisher:** активный + standby или несколько инстансов с координацией через блокировки.
+
+**БД:** read-реплики для GET-запросов, шардирование по task_id при росте.
+
+---
+
+## Потенциальные точки отказа
+
+| Проблема | Решение |
+|----------|---------|
+| Publisher упал — задачи копятся в outbox | Дубликация publisher или CDC |
+| PostgreSQL не выдерживает нагрузку | Read-реплики, outbox в Redis |
+| `durable=True` — медленная запись на диск | Lazy queues в RabbitMQ |
+| Нет rate limiting | Nginx / API Gateway |
+
+---
+
+## Что добавить для продакшена
+
+- Аутентификация и авторизация
+- Rate limiting
+- TTL для сообщений в RabbitMQ и Dead Letter Queue
+- Метрики (Prometheus + Grafana)
+- Структурированное логирование в ELK/Loki
+- Интеграционные и E2E тесты
+- Graceful shutdown (SIGTERM)
+- API versioning (`/api/v1/tasks`)
+- Connection pooling с настройкой `pool_size`, `max_overflow`
+
+---
+
+## Структура проекта
+
+```
+├── api/                # FastAPI приложение
+│   └── routers/        # Эндпоинты
+├── worker/             # Consumer — обработка задач
+│   └── solver.py       # Бизнес-логика обработки
+├── relay/              # Publisher — outbox → RabbitMQ
+├── broker/             # Обёртка над aio-pika
+├── service/            # Сервисный слой (вся работа с БД)
+├── database/           # Engine, session, миграции
+│   └── migration/      # Alembic
+├── shared/             # Общий код
+│   ├── models/         # SQLAlchemy ORM-модели
+│   ├── schemas/        # Pydantic-схемы
+│   └── config.py       # Настройки из переменных окружения
+├── docker-compose.yml
+├── Dockerfile
+└── requirements.txt
+```
+
+---
+
+## Миграции
+
+Используется Alembic. Миграции хранятся в `database/migration/versions/` и применяются автоматически при `docker compose up`.
+
+Для создания новой миграции локально:
+
+```bash
+docker compose up postgres -d
+alembic revision --autogenerate -m "description"
+alembic upgrade head
+```
