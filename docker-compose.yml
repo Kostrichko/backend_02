@@ -69,7 +69,7 @@ services:
 
   migrations:
     build: .
-    command: ["sh", "-c", "PGPASSWORD=postgres psql -h postgres -U postgres -d tasks_db -c 'DROP TABLE IF EXISTS alembic_version' 2>/dev/null || true && alembic revision --autogenerate -m 'auto' || true && alembic upgrade head"]
+    command: ["sh", "-c", "alembic upgrade head"]
     environment:
       - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/tasks_db
     depends_on:
