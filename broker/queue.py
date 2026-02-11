@@ -1,7 +1,11 @@
 import asyncio
+import logging
 import aio_pika
 from aio_pika import Message, DeliveryMode
 from shared.config import settings
+import json
+
+logger = logging.getLogger(__name__)
 
 
 class Queue:
@@ -10,17 +14,18 @@ class Queue:
         self.channel = None
 
     async def connect(self):
+        logger.info(f"Connecting to RabbitMQ at {settings.RABBITMQ_URL}")
         self.connection = await aio_pika.connect_robust(settings.RABBITMQ_URL)
         self.channel = await self.connection.channel()
         await self.channel.declare_queue(settings.RABBITMQ_QUEUE, durable=True)
+        logger.info(f"Connected to queue '{settings.RABBITMQ_QUEUE}'")
 
     async def disconnect(self):
         if self.connection:
             await self.connection.close()
+            logger.info("Disconnected from RabbitMQ")
 
     async def publish(self, message: dict):
-        """Publish message dict to queue."""
-        import json
         await self.channel.default_exchange.publish(
             Message(
                 body=json.dumps(message).encode(),

@@ -1,22 +1,24 @@
 from typing import Sequence
+import logging
 from sqlalchemy import select
 from shared.models import Outbox
 
+logger = logging.getLogger(__name__)
+
 
 class OutboxService:
-    """Service for managing outbox pattern messages."""
     
     def __init__(self, session):
         self.session = session
     
     async def get_pending_messages(self, limit: int = 10) -> Sequence[Outbox]:
-        """Get pending outbox messages ordered by ID."""
         result = await self.session.execute(
-            select(Outbox).order_by(Outbox.id).limit(limit)
-        )
-        return result.scalars().all()
+            select(Outbox).order_by(Outbox.id).limit(limit))
+        messages = result.scalars().all()
+        logger.debug(f"Retrieved {len(messages)} pending outbox messages")
+        return messages
     
     async def delete_message(self, message: Outbox) -> None:
-        """Delete a message from outbox."""
         await self.session.delete(message)
         await self.session.commit()
+        logger.debug(f"Deleted outbox message {message.id}")

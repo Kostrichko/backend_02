@@ -1,7 +1,10 @@
 from typing import Sequence
+import logging
 from sqlalchemy import select
 from shared.models import Task, TaskStatus, Outbox
 from shared.schemas import TaskCreate, TaskUpdate
+
+logger = logging.getLogger(__name__)
 
 
 class TaskService:
@@ -16,12 +19,12 @@ class TaskService:
         outbox = Outbox(task_id=task.id)
         self.session.add(outbox)
         await self.session.commit()
+        logger.info(f"Created task {task.id} with outbox entry")
         return task
 
     async def get_task(self, task_id: int) -> Task | None:
         result = await self.session.execute(
-            select(Task).where(Task.id == task_id)
-        )
+            select(Task).where(Task.id == task_id))
         return result.scalar_one_or_none()
 
     async def get_all_tasks(self) -> Sequence[Task]:
@@ -29,7 +32,6 @@ class TaskService:
         return result.scalars().all()
 
     async def update_task(self, task_id: int, task_data: TaskUpdate) -> Task | None:
-        """Update task fields from task_data."""
         task = await self.get_task(task_id)
         if not task:
             return None
@@ -45,16 +47,11 @@ class TaskService:
         return task
 
     async def try_claim_task_for_processing(self, task_id: int) -> tuple[Task | None, str | None]:
-        """Try to claim a task for processing with pessimistic lock.
-        
-        Returns:
-            (task, payload) if successfully claimed, (None, None) otherwise
-        """
+        """Try to claim a task for processing with pessimistic lock."""
         result = await self.session.execute(
             select(Task)
             .where(Task.id == task_id)
-            .with_for_update()
-        )
+            .with_for_update())
         task = result.scalar_one_or_none()
         
         if not task or task.status != TaskStatus.PENDING:
@@ -66,7 +63,6 @@ class TaskService:
         return task, payload
     
     async def complete_task(self, task_id: int, result_data: str, status: TaskStatus) -> None:
-        """Update task with processing result."""
         task = await self.get_task(task_id)
         if task:
             task.status = status
@@ -80,16 +76,10 @@ class TaskService:
         await self.session.commit()
 
     async def delete_task(self, task_id: int) -> bool:
-        """Delete task only if it's not being processed.
-        
-        Uses SELECT FOR UPDATE to prevent race conditions where task status
-        changes between check and delete.
-        """
         result = await self.session.execute(
             select(Task)
             .where(Task.id == task_id)
-            .with_for_update()
-        )
+            .with_for_update())
         task = result.scalar_one_or_none()
         
         if not task:
