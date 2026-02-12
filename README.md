@@ -10,7 +10,7 @@ Backend-сервис на FastAPI для приема и асинхронной 
 - принимает задачи через `POST /tasks` с полем `payload`
 - сохраняет в PostgreSQL и отправляет в очередь
 - фоновым воркером обрабатывает задачи (имитация через sleep)
-- обновляет статус: `pending` → `processing` → `done` / `failed`
+- обновляет статус: `pending` -> `processing` -> `done` / `failed`
 - запускается через `docker compose up`
 
 ---
@@ -35,8 +35,8 @@ RabbitMQ UI: http://localhost:15672 (guest/guest)
 │   API   │─────▶│ Service │─────▶│ Postgres │◀─────│ Publisher│─────▶│RabbitMQ│
 │ FastAPI │      │  Layer  │      │  +Outbox │      │  (Relay) │      │        │
 └─────────┘      └─────────┘      └──────────┘      └──────────┘      └────┬───┘
-                                         ▲                                    │
-                                         │                                    ▼
+                                         ▲                                 │
+                                         │                                 ▼
                                    ┌─────────┐                         ┌─────────┐
                                    │ Service │◀────────────────────────│ Worker  │
                                    │  Layer  │                         └─────────┘
@@ -81,8 +81,7 @@ Publisher (relay) периодически читает outbox и публику
 
 **Зачем:**
 - API работает только с БД — ACID транзакции
-- Гарантия доставки (eventually consistent)
-- Payload не попадает в брокер — защита от больших данных
+- Гарантия доставки eventually consistent
 
 ### SELECT FOR UPDATE
 
@@ -141,7 +140,7 @@ for msg in messages:
 
 ## Масштабирование
 
-**Worker:** запустить N реплик — RabbitMQ распределит задачи автоматически (round-robin). `SELECT FOR UPDATE` гарантирует, что задача будет обработана ровно один раз.
+**Worker:** запустить N реплик — RabbitMQ распределит задачи автоматически. `SELECT FOR UPDATE` гарантирует, что задача будет обработана ровно один раз.
 
 **API:** несколько реплик за балансировщиком.
 
@@ -149,16 +148,6 @@ for msg in messages:
 
 **БД:** read-реплики для GET-запросов, шардирование по task_id при росте.
 
----
-
-## Потенциальные точки отказа
-
-| Проблема | Решение |
-|----------|---------|
-| Publisher упал — задачи копятся в outbox | Дубликация publisher или CDC |
-| PostgreSQL не выдерживает нагрузку | Read-реплики, outbox в Redis |
-| `durable=True` — медленная запись на диск | Lazy queues в RabbitMQ |
-| Нет rate limiting | Nginx / API Gateway |
 
 ---
 
@@ -166,13 +155,11 @@ for msg in messages:
 
 - Аутентификация и авторизация
 - Rate limiting
-- TTL для сообщений в RabbitMQ и Dead Letter Queue
+- TTL для сообщений в RabbitMQ и DLQ
 - Метрики (Prometheus + Grafana)
-- Структурированное логирование в ELK/Loki
-- Интеграционные и E2E тесты
-- Graceful shutdown (SIGTERM)
-- API versioning (`/api/v1/tasks`)
-- Connection pooling с настройкой `pool_size`, `max_overflow`
+- Покрытие тестами
+- API версионирование 
+- Connection pooling
 
 ---
 
